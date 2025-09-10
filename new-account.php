@@ -1,71 +1,98 @@
 <?php
-include 'db.php';
+include("db.php");
+// Hides account form
+$showAccountForm = false;
 
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    if ($conn->select_db("Long_Do_Bank")) {
-        $name    = $_POST['name'];
-        $surname = $_POST['surname'];
-        $acc_id  = $_POST['acc_id'];
-        $deposit = $_POST['deposit'];
+// initialize customer id
+$customer_id = null;
 
-        // Insert customer
-        $stmt1 = $conn->prepare("INSERT INTO customer (name, surname) VALUES (?, ?)");
-        $stmt1->bind_param("ss", $name, $surname);
+// selects the customer-id, search via name
+if (isset($_POST["check"])) {
+    $sel_cus = $_POST["customer"];
+    $stmtid = $conn->prepare("SELECT cus_id FROM customers WHERE name = ?");
+    $stmtid->bind_param("s", $sel_cus);
+    $stmtid->execute();
+    $stmtid->bind_result($customer_id);
+    // then show form
+    if ($stmtid->fetch()) {
+        $showAccountForm = true;
+    }
+    $stmtid->close();
+}
+// insert into account
+if (isset($_POST["create_account"])) {
+    if (!empty($_POST["customerid"])) {
+        $customerid = $_POST["customerid"];
+        $accounttype = $_POST["account_type"];
+        $initial_amount = $_POST["deposit"];
 
-        if ($stmt1->execute()) {
-            echo "Customer record created successfully<br>";
+        $accstmt = $conn->prepare("INSERT INTO accounts (cus_id, acc_type) VALUES (?, ?)");
+        $accstmt->bind_param("is", $customerid, $accounttype);
+        $accstmt->execute();
+        echo "<p>Account created successfully!</p>";
 
-            // Get last inserted customer ID
-            $cus_id = $conn->insert_id;
-            $stmt1->close();
+        // Get the newly inserted account ID
+        $account_id = $conn->insert_id;
 
-            // Insert account linked to this customer
-            $stmt2 = $conn->prepare("INSERT INTO accounts (acc_id, deposit, cus_id) VALUES (?, ?, ?)");
-            $stmt2->bind_param("iii", $acc_id, $deposit, $cus_id);
+        // Insert deposit transaction
+        $depositstmt = $conn->prepare("INSERT INTO transactions (deposit) VALUES (?)");
+        $depositstmt->bind_param("i", $initial_amount); 
+        $depositstmt->execute();
+        $transaction_id = $conn->insert_id;
+        $depositstmt->close();
 
-            if ($stmt2->execute()) {
-                echo "Account record created successfully<br>";
-                $stmt2->close();
-
-                // Redirect to homepage
-                header("Location: home.html");
-                exit();
-            } else {
-                echo "Error inserting account: " . $stmt2->error;
-            }
-        } else {
-            echo "Error inserting customer: " . $stmt1->error;
-        }
+        // Link account and transaction
+        $linkstmt = $conn->prepare("INSERT INTO account_transaction (acc_id, transaction_id) VALUES (?, ?)");
+        $linkstmt->bind_param("ii", $account_id, $transaction_id);
+        $linkstmt->execute();
+        $linkstmt->close();
     }
 }
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Add account</title>
+    <title>Add Account</title>
 </head>
 <body>
     <h2>Create New Account</h2>
-    <form action="new-account.php" method="POST">
-        <!-- name -->
-        <label for="name">Customer name: </label>
-        <input type="text" name="name" placeholder="Sobree" required><br><br>
-
-        <!-- surname -->
-        <label for="surname">Customer surname: </label>
-        <input type="text" name="surname" placeholder="Hajihama" required><br><br>
-
-        <!-- account id -->
-        <label for="acc_id">Customer account: </label>
-        <input type="number" name="acc_id" placeholder="1234567890" required><br><br>
-
-        <!-- deposit -->
-        <label for="deposit">Initial Deposit: </label>
-        <input type="number" name="deposit" placeholder="500" required><br><br>
-
-        <button type="submit">Create Account</button>
+    <form action="new-account.php" method="post">
+        <?php
+        $sqlcus = "SELECT name FROM customers";
+        $cus_result = $conn->query($sqlcus);
+        if ($cus_result && $cus_result->num_rows > 0) {
+            echo "<label for='customer'>Current customer: </label>";
+            echo "<select name='customer' id='customer'>";
+            while ($row = $cus_result->fetch_assoc()) {
+                echo "<option value='" . htmlspecialchars($row["name"]) . "'>" . htmlspecialchars($row["name"]) . "</option>";
+            }
+            echo "</select><br><br>";
+        } else {
+            echo "No customer found.<br>";
+        }
+        ?>
+        <input type="submit" name="check" value="Check Customer">
     </form>
+        <!-- special hidden form for existing customers only -->
+    <?php if ($showAccountForm): ?>
+        <form action="new-account.php" method="post">
+            <input type="hidden" name="customerid" value="<?php echo $customer_id; ?>">
+            <label for="account_type">Choose an account type:</label>
+            <select id="account_type" name="account_type">
+                <option value="simple">Simple Savings Account</option>
+                <option value="compound">Compound Savings Account</option>
+            </select>
+            <label for="deposit"> Initial Deposit amount: </label>
+            <input type="number" name="deposit">
+            <input type="submit" name="create_account" value="Submit">
+        </form>
+    <?php endif; ?>
+
+    <br>
+    <button><a href="new-customer.php">New Customer</a></button>
+    <br><br>
+    <button><a href="home.html">CANCEL</a></button>
 </body>
 </html>
